@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Pointage du personnel</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: one narrow column, phone first. Date bar, two team tabs, one card per person with arrival, departure, break and hours, then the Excel report. */
+:root {
+  --bg: #f1f4f7;
+  --surface: #ffffff;
+  --ink: #152033;
+  --muted: #5a6679;
+  --line: #d9e0e8;
+  --accent: #0a6c74;
+  --accent-ink: #ffffff;
+  --accent-soft: #dff1f2;
+  --ok: #17724a;
+  --ok-soft: #dff3e8;
+  --warn: #9a5a00;
+  --warn-soft: #fdeccf;
+  --idle: #5a6679;
+  --idle-soft: #e8ecf1;
+  --font-body: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, "Segoe UI", Tahoma, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151d;
+    --surface: #17202b;
+    --ink: #e7edf4;
+    --muted: #9aa6b8;
+    --line: #2a3646;
+    --accent: #45b8bf;
+    --accent-ink: #06191b;
+    --accent-soft: #14343a;
+    --ok: #5fd39a;
+    --ok-soft: #153526;
+    --warn: #f0b457;
+    --warn-soft: #3a2b10;
+    --idle: #9aa6b8;
+    --idle-soft: #243040;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151d;
+  --surface: #17202b;
+  --ink: #e7edf4;
+  --muted: #9aa6b8;
+  --line: #2a3646;
+  --accent: #45b8bf;
+  --accent-ink: #06191b;
+  --accent-soft: #14343a;
+  --ok: #5fd39a;
+  --ok-soft: #153526;
+  --warn: #f0b457;
+  --warn-soft: #3a2b10;
+  --idle: #9aa6b8;
+  --idle-soft: #243040;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  padding-block: 18px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 760px; margin-inline: auto; display: flex; flex-direction: column; gap: 16px; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.top > div { min-width: 0; }
+h1 { margin: 0; font-size: 1.45rem; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.date-label { margin: 2px 0 0; color: var(--muted); text-transform: capitalize; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); flex-shrink: 0; }
+.seg button { border: 0; background: transparent; padding: 7px 12px; font-weight: 500; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+.datebar { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.datebar .nav { width: 42px; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; font-size: 1.3rem; line-height: 1; }
+[dir="rtl"] .datebar .nav span { display: inline-block; transform: scaleX(-1); }
+.datebar input[type="date"] { flex: 1 1 150px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 9px 10px; font-family: var(--font-mono); font-weight: 500; }
+.datebar .today { border: 1px solid var(--accent); background: transparent; color: var(--accent); border-radius: 8px; padding: 0 14px; font-weight: 500; }
+
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tab { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 11px 12px; text-align: start; display: flex; flex-direction: column; gap: 1px; }
+.tab b { font-weight: 600; }
+.tab small { color: var(--muted); font-size: 0.82rem; }
+.tab[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+
+.summary { display: flex; gap: 20px; flex-wrap: wrap; color: var(--muted); font-size: 0.92rem; }
+.summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 600; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.name { margin: 0; font-size: 1.15rem; font-weight: 600; }
+.role { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.pill { font-size: 0.78rem; font-weight: 600; padding: 3px 10px; border-radius: 99px; white-space: nowrap; background: var(--idle-soft); color: var(--idle); }
+.pill.working { background: var(--accent-soft); color: var(--accent); }
+.pill.done { background: var(--ok-soft); color: var(--ok); }
+.pill.missing { background: var(--warn-soft); color: var(--warn); }
+
+.times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label, .lbl { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.field input[type="time"] { width: 100%; min-width: 0; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 10px 8px; font-family: var(--font-mono); font-size: 1.15rem; font-weight: 500; text-align: center; }
+.now { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 8px 6px; font-weight: 600; font-size: 0.9rem; }
+
+.break { display: flex; flex-direction: column; gap: 7px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { border: 1px solid var(--line); background: var(--bg); border-radius: 99px; padding: 5px 12px; font-family: var(--font-mono); font-size: 0.9rem; }
+.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.custom { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 0.88rem; }
+.custom input { width: 64px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 5px 6px; font-family: var(--font-mono); text-align: center; }
+
+.result { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; border-top: 1px dashed var(--line); padding-top: 11px; }
+.result span { color: var(--muted); font-size: 0.9rem; }
+.result strong { font-family: var(--font-mono); font-size: 1.35rem; font-weight: 600; }
+.note { margin: -6px 0 0; font-size: 0.82rem; color: var(--warn); min-height: 0; }
+.note:empty { display: none; }
+.clear { align-self: flex-start; border: 0; background: transparent; color: var(--muted); text-decoration: underline; padding: 2px 0; font-size: 0.85rem; }
+
+.report { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.report h2 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+.report .sub { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 8px; padding: 10px 14px; font-weight: 600; display: flex; flex-direction: column; align-items: flex-start; gap: 0; text-align: start; }
+.btn small { font-weight: 400; opacity: 0.85; font-size: 0.78rem; text-transform: capitalize; }
+.btn.alt { background: transparent; color: var(--accent); justify-content: center; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.85rem; direction: ltr; }
+th, td { padding: 7px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th { background: var(--idle-soft); font-weight: 600; font-size: 0.78rem; }
+td.num { font-family: var(--font-mono); }
+tr:last-child td { border-bottom: 0; }
+
+.foot { color: var(--muted); font-size: 0.8rem; min-height: 1.2em; }
+.toast { position: fixed; inset-inline: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); margin-inline: auto; max-width: 420px; background: var(--ink); color: var(--bg); padding: 11px 14px; border-radius: 10px; font-size: 0.92rem; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .2s, transform .2s; }
+.toast.show { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1 data-i18n="title">Pointage du personnel</h1>
+      <p class="date-label" id="dateLabel"></p>
+    </div>
+    <div class="seg" role="group" aria-label="Langue / اللغة">
+      <button type="button" data-lang="fr" aria-pressed="true">FR</button>
+      <button type="button" data-lang="ar" aria-pressed="false">عربي</button>
+    </div>
+  </header>
+
+  <section class="datebar">
+    <button type="button" class="nav" id="prev" data-i18n-aria="prev"><span>‹</span></button>
+    <input type="date" id="dateInput" dir="ltr" lang="en-GB">
+    <button type="button" class="nav" id="next" data-i18n-aria="next"><span>›</span></button>
+    <button type="button" class="today" id="today" data-i18n="today">Aujourd'hui</button>
+  </section>
+
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <div class="summary" id="summary"></div>
+  <main class="cards" id="cards"></main>
+
+  <section class="report">
+    <h2 data-i18n="reportTitle">Rapport</h2>
+    <p class="sub" data-i18n="reportSub">Le fichier Excel est toujours en français.</p>
+    <div class="actions">
+      <button type="button" class="btn" id="xDay"><span data-i18n="dayXlsx">Excel du jour</span><small id="xDayLbl"></small></button>
+      <button type="button" class="btn" id="xMonth"><span data-i18n="monthXlsx">Excel du mois</span><small id="xMonthLbl"></small></button>
+      <button type="button" class="btn alt" id="copyBtn" data-i18n="copy">Copier le tableau</button>
+    </div>
+    <div class="table-wrap"><table id="preview"></table></div>
+  </section>
+
+  <p class="foot" id="syncNote"></p>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  var STAFF = [
+    { id: 'soufiane', team: 1, fr: 'Soufiane', ar: 'سفيان', role: 'barman' },
+    { id: 'aya', team: 1, fr: 'Aya', ar: 'آية', role: 'menage' },
+    { id: 'hicham', team: 1, fr: 'Hicham', ar: 'هشام', role: 'serveur' },
+    { id: 'amine', team: 2, fr: 'Amine', ar: 'أمين', role: 'barman' },
+    { id: 'khadija', team: 2, fr: 'Khadija', ar: 'خديجة', role: 'menage' },
+    { id: 'cherif', team: 2, fr: 'Chérif', ar: 'شريف', role: 'serveur' }
+  ];
+  var ROLE = {
+    barman: { fr: 'Barman', ar: 'بارمان' },
+    serveur: { fr: 'Serveur', ar: 'سيرفور' },
+    menage: { fr: 'Femme de ménage', ar: 'عاملة النظافة' }
+  };
+  var T = {
+    fr: {
+      title: 'Pointage du personnel', today: "Aujourd'hui", prev: 'Jour précédent', next: 'Jour suivant',
+      team: function (n) { return 'Équipe ' + n; },
+      arrive: 'Arrivée', leave: 'Départ', now: 'Maintenant', brk: 'Pause', min: 'min', other: 'Autre',
+      worked: 'Heures travaillées', clear: 'Effacer',
+      none: 'Pas pointé', working: 'En service', done: 'Terminé', missing: 'Incomplet',
+      since: 'En service depuis', nextDay: 'Départ le lendemain', missingIn: "Heure d'arrivée manquante",
+      teamTotal: 'Total équipe', clocked: 'Pointés',
+      reportTitle: 'Rapport', reportSub: 'Le fichier Excel est toujours en français.',
+      dayXlsx: 'Excel du jour', monthXlsx: 'Excel du mois', copy: 'Copier le tableau',
+      saved: 'Fichier prêt', copied: 'Tableau copié', copyFail: 'Copie impossible ici',
+      noDl: "Téléchargement indisponible ici. Utilisez « Copier le tableau ».", noLib: 'Excel non chargé, vérifiez la connexion.',
+      syncOk: 'Enregistré et synchronisé', syncLocal: 'Enregistré sur cet appareil', empty: 'Aucun pointage ce mois-ci.'
+    },
+    ar: {
+      title: 'تسجيل حضور المستخدمين', today: 'اليوم', prev: 'اليوم السابق', next: 'اليوم الموالي',
+      team: function (n) { return 'الفريق ' + n; },
+      arrive: 'الدخول', leave: 'الخروج', now: 'الآن', brk: 'الاستراحة', min: 'د', other: 'آخر',
+      worked: 'ساعات العمل', clear: 'مسح',
+      none: 'لم يُسجَّل', working: 'في الخدمة', done: 'انتهى', missing: 'ناقص',
+      since: 'في الخدمة منذ', nextDay: 'الخروج في اليوم الموالي', missingIn: 'وقت الدخول ناقص',
+      teamTotal: 'مجموع الفريق', clocked: 'المسجَّلون',
+      reportTitle: 'التقرير', reportSub: 'ملف Excel يخرج دائما بالفرنسية.',
+      dayXlsx: 'Excel لليوم', monthXlsx: 'Excel للشهر', copy: 'نسخ الجدول',
+      saved: 'الملف جاهز', copied: 'تم نسخ الجدول', copyFail: 'النسخ غير ممكن هنا',
+      noDl: 'التحميل غير متاح هنا. استعمل «نسخ الجدول».', noLib: 'تعذر تحميل Excel، تأكد من الاتصال.',
+      syncOk: 'تم الحفظ والمزامنة', syncLocal: 'تم الحفظ على هذا الجهاز', empty: 'لا تسجيلات هذا الشهر.'
+    }
+  };
+  T.ar.title = 'تسجيل الحضور';
+
+  var state = { date: todayKey(), team: 1, lang: 'fr', days: {} };
+  var db = null;
+  var dirty = {};
+  var timers = {};
+  var chain = {};
+
+  function $(s) { return document.querySelector(s); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function t() { return T[state.lang]; }
+  function keyOf(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function todayKey() { return keyOf(new Date()); }
+  function dateOf(key) { var p = key.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
+  function dmy(key) { var p = key.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function hhmmNow() { var d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function hhmm(mins) { return pad(Math.floor(mins / 60)) + ':' + pad(mins % 60); }
+  function dec(mins) { return Math.round(mins / 60 * 100) / 100; }
+  function fmtHM(mins) {
+    var h = Math.floor(mins / 60), m = mins % 60;
+    return state.lang === 'ar' ? h + ' س ' + pad(m) + ' د' : h + ' h ' + pad(m);
+  }
+  function latin(s) {
+    return String(s).replace(/[\u0660-\u0669]/g, function (c) { return c.charCodeAt(0) - 0x0660; })
+                    .replace(/[\u06F0-\u06F9]/g, function (c) { return c.charCodeAt(0) - 0x06F0; });
+  }
+  function locale() { return state.lang === 'ar' ? 'ar-u-nu-latn' : 'fr-FR'; }
+  function longDate(key) {
+    var o = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' };
+    try { return latin(dateOf(key).toLocaleDateString(locale(), o)); } catch (e) { return dmy(key); }
+  }
+  function monthLabel(key, lang) {
+    var o = { month: 'long', year: 'numeric', numberingSystem: 'latn' };
+    var loc = lang === 'ar' ? 'ar-u-nu-latn' : 'fr-FR';
+    try { return latin(dateOf(key).toLocaleDateString(loc, o)); } catch (e) { return key.slice(0, 7); }
+  }
+  function toMin(s) { var p = s.split(':'); return Number(p[0]) * 60 + Number(p[1]); }
+
+  function calc(e) {
+    e = e || {};
+    var out = { state: 'none', gross: 0, net: 0, overnight: false };
+    if (!e.in && !e.out) return out;
+    if (e.in && !e.out) { out.state = 'working'; return out; }
+    if (!e.in && e.out) { out.state = 'missing'; return out; }
+    var a = toMin(e.in), b = toMin(e.out);
+    if (b < a) { b += 1440; out.overnight = true; }
+    out.gross = b - a;
+    out.net = Math.max(0, out.gross - (Number(e.br) || 0));
+    out.state = 'done';
+    return out;
+  }
+
+  /* ---------- storage ---------- */
+  function loadLocal() {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf('pointage:') === 0) {
+          state.days[k.slice(9)] = JSON.parse(localStorage.getItem(k)) || {};
+        }
+      }
+      var l = localStorage.getItem('pointage-lang');
+      if (l === 'fr' || l === 'ar') state.lang = l;
+    } catch (e) {}
+  }
+  function persist(key) {
+    dirty[key] = true;
+    clearTimeout(timers[key]);
+    timers[key] = setTimeout(function () { flush(key); }, 400);
+  }
+  function flush(key) {
+    var data = state.days[key] || {};
+    try { localStorage.setItem('pointage:' + key, JSON.stringify(data)); } catch (e) {}
+    chain[key] = (chain[key] || Promise.resolve()).then(function () {
+      if (!db) { delete dirty[key]; return; }
+      return db.doc('days/' + key).set({ entries: data, updated: Date.now() }).then(function () {
+        setSync('ok');
+      }, function () {
+        setSync('local');
+      }).then(function () { delete dirty[key]; });
+    });
+  }
+  function setSync(mode) {
+    $('#syncNote').textContent = mode === 'ok' ? t().syncOk : t().syncLocal;
+    $('#syncNote').dataset.mode = mode;
+  }
+  function initDb() {
+    if (!window.claude || !window.claude.use) { setSync('local'); return; }
+    var timer = setTimeout(function () { setSync('local'); }, 10000);
+    window.claude.use('db').then(function (d) {
+      if (!d) { clearTimeout(timer); setSync('local'); return; }
+      db = d;
+      db.collection('days').onSnapshot(function (snap) {
+        clearTimeout(timer);
+        snap.docs.forEach(function (doc) {
+          if (dirty[doc.id]) return;
+          var body = doc.data() || {};
+          state.days[doc.id] = body.entries || {};
+          try { localStorage.setItem('pointage:' + doc.id, JSON.stringify(state.days[doc.id])); } catch (e) {}
+        });
+        if (!snap.metadata.fromCache) setSync('ok');
+        refreshAll();
+      }, function () { clearTimeout(timer); db = null; setSync('local'); });
+    }, function () { clearTimeout(timer); setSync('local'); });
+  }
+
+  /* ---------- entries ---------- */
+  function entryOf(id) { return ((state.days[state.date] || {})[id]) || {}; }
+  function setField(id, field, val) {
+    var day = state.days[state.date] || (state.days[state.date] = {});
+    var e = day[id] || (day[id] = {});
+    if (val === '' || val == null) delete e[field]; else e[field] = val;
+    if (Object.keys(e).length === 0) delete day[id];
+    persist(state.date);
+    refreshAll();
+  }
+  function clearEntry(id) {
+    var day = state.days[state.date];
+    if (day && day[id]) { delete day[id]; persist(state.date); }
+    refreshAll();
+  }
+
+  /* ---------- rendering ---------- */
+  function cardHTML(p) {
+    var L = t(), id = p.id;
+    var chips = [0, 15, 30, 45, 60].map(function (v) {
+      return '<button type="button" class="chip" data-act="br" data-v="' + v + '">' + v + '</button>';
+    }).join('');
+    return '<article class="card" data-id="' + id + '">' +
+      '<div class="card-head"><div><h2 class="name">' + p[state.lang] + '</h2><p class="role">' + ROLE[p.role][state.lang] + '</p></div>' +
+      '<span class="pill" data-k="pill"></span></div>' +
+      '<div class="times">' +
+        '<div class="field"><label for="in-' + id + '">' + L.arrive + '</label>' +
+          '<input type="time" id="in-' + id + '" data-field="in" dir="ltr" lang="en-GB">' +
+          '<button type="button" class="now" data-act="now" data-field="in">' + L.now + '</button></div>' +
+        '<div class="field"><label for="out-' + id + '">' + L.leave + '</label>' +
+          '<input type="time" id="out-' + id + '" data-field="out" dir="ltr" lang="en-GB">' +
+          '<button type="button" class="now" data-act="now" data-field="out">' + L.now + '</button></div>' +
+      '</div>' +
+      '<div class="break"><span class="lbl">' + L.brk + ' (' + L.min + ')</span>' +
+        '<div class="chips">' + chips +
+        '<label class="custom" for="br-' + id + '">' + L.other + '<input type="number" id="br-' + id + '" data-field="br" min="0" max="480" step="5" inputmode="numeric" dir="ltr" lang="en-GB"></label></div></div>' +
+      '<div class="result"><span>' + L.worked + '</span><strong data-k="net">—</strong></div>' +
+      '<p class="note" data-k="note"></p>' +
+      '<button type="button" class="clear" data-act="clear">' + L.clear + '</button>' +
+    '</article>';
+  }
+  function buildCards() {
+    var list = STAFF.filter(function (p) { return p.team === state.team; });
+    $('#cards').innerHTML = list.map(cardHTML).join('');
+  }
+  function setVal(el, v) { if (el && document.activeElement !== el) el.value = v; }
+  function updateCard(p) {
+    var card = $('.card[data-id="' + p.id + '"]');
+    if (!card) return;
+    var L = t(), e = entryOf(p.id), c = calc(e);
+    var pill = card.querySelector('[data-k="pill"]');
+    pill.className = 'pill ' + c.state;
+    pill.textContent = L[c.state];
+    setVal(card.querySelector('[data-field="in"][type="time"]'), e.in || '');
+    setVal(card.querySelector('[data-field="out"][type="time"]'), e.out || '');
+    setVal(card.querySelector('input[data-field="br"]'), e.br ? e.br : '');
+    var br = Number(e.br) || 0;
+    card.querySelectorAll('.chip').forEach(function (b) { b.classList.toggle('on', Number(b.dataset.v) === br); });
+    card.querySelector('[data-k="net"]').textContent = c.state === 'done' ? fmtHM(c.net) : '—';
+    var note = '';
+    if (c.state === 'working') note = L.since + ' ' + e.in;
+    else if (c.state === 'missing') note = L.missingIn;
+    else if (c.overnight) note = L.nextDay;
+    card.querySelector('[data-k="note"]').textContent = note;
+  }
+  function teamStats(team) {
+    var n = 0, total = 0, mins = 0;
+    STAFF.forEach(function (p) {
+      if (p.team !== team) return;
+      total++;
+      var c = calc(entryOf(p.id));
+      if (c.state !== 'none') n++;
+      if (c.state === 'done') mins += c.net;
+    });
+    return { n: n, total: total, mins: mins };
+  }
+  function updateTabs() {
+    var L = t();
+    $('#tabs').innerHTML = [1, 2].map(function (n) {
+      var s = teamStats(n);
+      return '<button type="button" class="tab" role="tab" data-team="' + n + '" aria-selected="' + (state.team === n) + '">' +
+        '<b>' + L.team(n) + '</b><small>' + L.clocked + ' ' + s.n + '/' + s.total + '</small></button>';
+    }).join('');
+  }
+  function updateSummary() {
+    var L = t(), s = teamStats(state.team);
+    $('#summary').innerHTML = '<span>' + L.clocked + ' <b>' + s.n + '/' + s.total + '</b></span>' +
+      '<span>' + L.teamTotal + ' <b>' + fmtHM(s.mins) + '</b></span>';
+  }
+  function statutFR(c) {
+    return c.state === 'done' ? 'Complet' : c.state === 'working' ? 'En cours' : c.state === 'missing' ? 'Incomplet' : 'Non pointé';
+  }
+  var COLS = ['Date', 'Équipe', 'Nom', 'Poste', 'Arrivée', 'Départ', 'Pause (min)', 'Heures travaillées', 'Heures (décimal)', 'Statut'];
+  function rowFor(key, p) {
+    var e = ((state.days[key] || {})[p.id]) || {};
+    return { key: key, p: p, e: e, c: calc(e) };
+  }
+  function rowArr(r) {
+    var done = r.c.state === 'done';
+    return [dmy(r.key), 'Équipe ' + r.p.team, r.p.fr, ROLE[r.p.role].fr, r.e.in || '', r.e.out || '',
+      r.c.state === 'none' ? '' : (Number(r.e.br) || 0), done ? hhmm(r.c.net) : '', done ? dec(r.c.net) : '', statutFR(r.c)];
+  }
+  function dayRows(key) { return STAFF.map(function (p) { return rowFor(key, p); }); }
+  function monthRows(key) {
+    var ym = key.slice(0, 7), out = [];
+    Object.keys(state.days).sort().forEach(function (k) {
+      if (k.indexOf(ym) !== 0) return;
+      STAFF.forEach(function (p) { var r = rowFor(k, p); if (r.c.state !== 'none') out.push(r); });
+    });
+    return out;
+  }
+  function sheetRows(rows) {
+    var tot = 0;
+    rows.forEach(function (r) { if (r.c.state === 'done') tot += r.c.net; });
+    var aoa = [COLS].concat(rows.map(rowArr));
+    aoa.push(['Total', '', '', '', '', '', '', hhmm(tot), dec(tot), '']);
+    return aoa;
+  }
+  function recapRows(rows) {
+    var aoa = [['Équipe', 'Nom', 'Poste', 'Jours complets', 'Total (hh:mm)', 'Total (décimal)', 'Moyenne par jour (décimal)']];
+    STAFF.forEach(function (p) {
+      var days = 0, mins = 0;
+      rows.forEach(function (r) { if (r.p.id === p.id && r.c.state === 'done') { days++; mins += r.c.net; } });
+      aoa.push(['Équipe ' + p.team, p.fr, ROLE[p.role].fr, days, hhmm(mins), dec(mins), days ? dec(mins / days) : 0]);
+    });
+    return aoa;
+  }
+  function updatePreview() {
+    var aoa = sheetRows(dayRows(state.date));
+    var html = '<thead><tr>' + aoa[0].map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>';
+    for (var i = 1; i < aoa.length; i++) {
+      html += '<tr>' + aoa[i].map(function (v, j) {
+        return '<td' + (j >= 4 && j <= 8 ? ' class="num"' : '') + '>' + (v === '' ? '' : v) + '</td>';
+      }).join('') + '</tr>';
+    }
+    $('#preview').innerHTML = html + '</tbody>';
+    $('#xDayLbl').textContent = dmy(state.date);
+    $('#xMonthLbl').textContent = monthLabel(state.date, 'fr');
+  }
+  function refreshAll() {
+    STAFF.forEach(updateCard);
+    updateTabs();
+    updateSummary();
+    updatePreview();
+  }
+  function applyLang() {
+    var L = t();
+    document.documentElement.lang = state.lang;
+    document.documentElement.dir = state.lang === 'ar' ? 'rtl' : 'ltr';
+    document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = L[el.dataset.i18n]; });
+    document.querySelectorAll('[data-i18n-aria]').forEach(function (el) { el.setAttribute('aria-label', L[el.dataset.i18nAria]); });
+    document.querySelectorAll('[data-lang]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lang === state.lang)); });
+    document.title = L.title;
+    $('#dateLabel').textContent = longDate(state.date);
+    $('#dateInput').value = state.date;
+    $('#today').hidden = state.date === todayKey();
+    var mode = $('#syncNote').dataset.mode;
+    if (mode) setSync(mode);
+    buildCards();
+    refreshAll();
+  }
+  function goDate(key) {
+    state.date = key;
+    $('#dateLabel').textContent = longDate(key);
+    $('#dateInput').value = key;
+    $('#today').hidden = key === todayKey();
+    refreshAll();
+  }
+
+  /* ---------- report ---------- */
+  var toastTimer;
+  function toast(msg) {
+    var el = $('#toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 3200);
+  }
+  function buildBook(rows) {
+    var wb = XLSX.utils.book_new();
+    var s1 = XLSX.utils.aoa_to_sheet(sheetRows(rows));
+    s1['!cols'] = [12, 10, 12, 16, 9, 9, 12, 18, 16, 12].map(function (w) { return { wch: w }; });
+    var s2 = XLSX.utils.aoa_to_sheet(recapRows(rows));
+    s2['!cols'] = [10, 12, 16, 14, 14, 15, 24].map(function (w) { return { wch: w }; });
+    [[s1, 8], [s2, 5], [s2, 6]].forEach(function (x) {
+      var ws = x[0], col = x[1], range = XLSX.utils.decode_range(ws['!ref']);
+      for (var r = 1; r <= range.e.r; r++) {
+        var cell = ws[XLSX.utils.encode_cell({ r: r, c: col })];
+        if (cell && cell.t === 'n') cell.z = '0.00';
+      }
+    });
+    XLSX.utils.book_append_sheet(wb, s1, 'Pointage');
+    XLSX.utils.book_append_sheet(wb, s2, 'Récapitulatif');
+    return wb;
+  }
+  function browserSave(name, buf) {
+    try {
+      var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+      toast(t().saved);
+    } catch (e) { toast(t().noDl); }
+  }
+  function exportXlsx(kind) {
+    if (typeof XLSX === 'undefined') { toast(t().noLib); return; }
+    var rows = kind === 'day' ? dayRows(state.date) : monthRows(state.date);
+    if (!rows.length) { toast(t().empty); return; }
+    var name = kind === 'day' ? 'pointage_' + state.date + '.xlsx' : 'pointage_' + state.date.slice(0, 7) + '.xlsx';
+    var buf = XLSX.write(buildBook(rows), { bookType: 'xlsx', type: 'array' });
+    var get = window.claude && window.claude.use ? window.claude.use('downloads') : Promise.resolve(null);
+    get.then(function (dl) {
+      if (!dl) { browserSave(name, buf); return; }
+      return dl.save({ filename: name, data: buf }).then(function () { toast(t().saved); }, function (err) {
+        if (err && err.code === 'declined') return;
+        toast(t().noDl);
+      });
+    }, function () { toast(t().noDl); });
+  }
+  function copyTable() {
+    var text = sheetRows(dayRows(state.date)).map(function (r) { return r.join('\t'); }).join('\n');
+    try {
+      navigator.clipboard.writeText(text).then(function () { toast(t().copied); }, function () { toast(t().copyFail); });
+    } catch (e) { toast(t().copyFail); }
+  }
+
+  /* ---------- events ---------- */
+  $('#cards').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button[data-act]');
+    if (!btn) return;
+    var id = btn.closest('.card').dataset.id;
+    var act = btn.dataset.act;
+    if (act === 'now') setField(id, btn.dataset.field, hhmmNow());
+    else if (act === 'br') setField(id, 'br', btn.dataset.v === '0' ? '' : btn.dataset.v);
+    else if (act === 'clear') clearEntry(id);
+  });
+  $('#cards').addEventListener('change', function (ev) {
+    var inp = ev.target.closest('input[data-field]');
+    if (!inp) return;
+    var id = inp.closest('.card').dataset.id;
+    var v = inp.value;
+    if (inp.dataset.field === 'br') { v = v === '' ? '' : String(Math.max(0, Math.min(480, Math.round(Number(v) || 0)))); if (v === '0') v = ''; }
+    setField(id, inp.dataset.field, v);
+  });
+  $('#tabs').addEventListener('click', function (ev) {
+    var b = ev.target.closest('.tab');
+    if (!b) return;
+    state.team = Number(b.dataset.team);
+    buildCards();
+    refreshAll();
+  });
+  document.querySelectorAll('[data-lang]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.lang = b.dataset.lang;
+      try { localStorage.setItem('pointage-lang', state.lang); } catch (e) {}
+      applyLang();
+    });
+  });
+  function shift(n) { var d = dateOf(state.date); d.setDate(d.getDate() + n); goDate(keyOf(d)); }
+  $('#prev').addEventListener('click', function () { shift(-1); });
+  $('#next').addEventListener('click', function () { shift(1); });
+  $('#today').addEventListener('click', function () { goDate(todayKey()); });
+  $('#dateInput').addEventListener('change', function (ev) { if (/^\d{4}-\d{2}-\d{2}$/.test(ev.target.value)) goDate(ev.target.value); });
+  $('#xDay').addEventListener('click', function () { exportXlsx('day'); });
+  $('#xMonth').addEventListener('click', function () { exportXlsx('month'); });
+  $('#copyBtn').addEventListener('click', copyTable);
+
+  loadLocal();
+  applyLang();
+  initDb();
+})();
+</script>
+</body>
+</html>
